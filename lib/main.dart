@@ -35,7 +35,7 @@ class MainApp extends StatelessWidget {
     return const MaterialApp(
       home: Scaffold(
         body: Center(
-          child: LoginWidget(),
+          child: RealTimeWidget(),
         ),
       ),
     );
@@ -55,6 +55,8 @@ class _LoginWidgetState extends State<LoginWidget> {
   TextEditingController login = TextEditingController();
   TextEditingController password = TextEditingController();
 
+  
+
   @override
   void setState(VoidCallback fn) {
     super.setState(fn);
@@ -64,6 +66,21 @@ class _LoginWidgetState extends State<LoginWidget> {
 
   @override
   Widget build(BuildContext context) {
+
+    var db = FirebaseFirestore.instance;
+    // we are going to check on the user status in real time 
+    // design patterns 
+    // singleton
+    // https://en.wikipedia.org/wiki/Singleton_pattern
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+
+      if(user != null){
+        print("USER: ${user.uid}");
+      } else {
+        print("SIGNED OUT");
+      }
+    });
+
     return Column(
       children: [
         Container(
@@ -88,26 +105,126 @@ class _LoginWidgetState extends State<LoginWidget> {
           )
         ),
         TextButton(
-          onPressed: () {}, 
+          onPressed: () async {
+            try {
+              // we use try to fail gracefully
+              // https://en.wikipedia.org/wiki/Graceful_exit
+              final user = 
+                await FirebaseAuth.instance
+                .createUserWithEmailAndPassword(
+                  email: login.text, 
+                  password: password.text
+                );
+              print("USER CREATED: ${user.user?.uid}");
+
+            } on FirebaseException catch(e) {
+              if(e.code == 'weak-password') {
+                print("your password is weak and so are you.");
+              } else if (e.code == 'email-already-in-use') {
+                print("account exists");
+              }
+            } catch(e) {
+              print(e);
+            } finally {
+              // this code will always run
+              // normally used to do clean up
+            }
+          }, 
           child: const Text("Sign up")
         ),
         TextButton(
-          onPressed: () {}, 
-          child: const Text("Log in")
+          child: const Text("Log in"),
+          onPressed: () async {
+            try {
+              final user = 
+                await  FirebaseAuth.instance.signInWithEmailAndPassword(
+                  email: login.text, 
+                  password: password.text
+                );
+            } catch (e) {
+              print(e);
+            }
+          }
         ),
         TextButton(
-          onPressed: () {}, 
-          child: const Text("Log out")
+          child: const Text("Log out"),
+          onPressed: () async {
+            await FirebaseAuth.instance.signOut();
+          }
         ),
-        TextButton(
-          onPressed: () {}, 
-          child: const Text("Add record")
+        TextButton( 
+          child: const Text("Add record"),
+          onPressed: () {
+            final puppy = <String, dynamic> {
+              "name" : "Fido",
+              "breed" : "Pomeranian",
+              "age" : 10.0
+            };
+
+            FirebaseFirestore.instance.collection("perritos").add(puppy).then(
+              (DocumentReference document) => print("new document created: ${document.id}")
+            );
+          }
         ),
-        TextButton(
-          onPressed: () {}, 
-          child: const Text("Query")
+        TextButton( 
+          child: const Text("Query"),
+          onPressed: () {
+            db.collection("perritos").get().then(
+              (perritos) {
+                for(var currentDoc in perritos.docs) {
+                  print("DOCUMENT: ${currentDoc.data()}");
+                }
+              }
+            );
+          }
         ),
       ],
+    );
+  }
+}
+
+class RealTimeWidget extends StatefulWidget {
+  const RealTimeWidget({super.key});
+
+  @override
+  State<RealTimeWidget> createState() => _RealTimeWidgetState();
+}
+
+class _RealTimeWidgetState extends State<RealTimeWidget> {
+
+  final Stream<QuerySnapshot> puppiesStream = 
+    FirebaseFirestore.instance.collection("perritos").snapshots();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: puppiesStream,
+      builder: (BuildContext context, AsyncSnapshot<QuerySnapshot> snapshot) {
+        if(snapshot.hasError){
+          return const Text("ERROR ON QUERY, PLEASE VERIFY");
+        }
+
+        if(snapshot.connectionState == ConnectionState.waiting) {
+          return const CircularProgressIndicator();
+        }
+
+        return ListView(
+          children: snapshot.data!.docs
+            .map((DocumentSnapshot doc) {
+              // iterate through docs and build a widget for each one 
+
+              // step 1
+              // get data of current doc 
+              Map<String, dynamic> data = doc.data()! as Map<String, dynamic>;
+
+              // with data now available step 2 - build a widget
+              return ListTile(
+                title: Text(data['name']),
+                subtitle: Text(data['breed']),
+              );
+            }).toList().cast(),
+        );
+      }
     );
   }
 }
